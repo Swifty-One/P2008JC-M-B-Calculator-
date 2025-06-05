@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2008JC Mass & Balance Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+
+    <script type="text/babel">
+
+        // --- Firebase Configuration ---
+        // IMPORTANT: Replace with your actual Firebase project config
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        
+        // --- App ID (for Firestore paths) ---
+        const appId = 'p2008jc-mass-balance-default';
+
+        // --- Initialize Firebase ---
+        let db;
+        let auth;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            auth = firebase.auth();
+        } catch (error) {
+            console.error("Error initializing Firebase:", error);
+        }
+
+        // --- Aircraft Data ---
+        const AIRCRAFT_COLLECTION_NAME = 'p2008jc_aircraft_fleet';
+        const initialAircraftData = [
+            { id: "I-OZZD", registration: "I-OZZD", name: "I-OZZD", emptyWeightKg: 432.0, emptyWeightMomentKgm: 792.7 },
+            { id: "I-OZZE", registration: "I-OZZE", name: "I-OZZE", emptyWeightKg: 433.5, emptyWeightMomentKgm: 815.4 },
+            { id: "I-OZZF", registration: "I-OZZF", name: "I-OZZF", emptyWeightKg: 433.0, emptyWeightMomentKgm: 815.8 },
+            { id: "I-OZZG", registration: "I-OZZG", name: "I-OZZG", emptyWeightKg: 442.0, emptyWeightMomentKgm: 836.6 },
+            { id: "I-OZZH", registration: "I-OZZH", name: "I-OZZH", emptyWeightKg: 433.0, emptyWeightMomentKgm: 812.8 },
+            { id: "I-OZZJ", registration: "I-OZZJ", name: "I-OZZJ", emptyWeightKg: 440.0, emptyWeightMomentKgm: 822.1 },
+            { id: "I-OZZL", registration: "I-OZZL", name: "I-OZZL", emptyWeightKg: 435.5, emptyWeightMomentKgm: 817.0 },
+            { id: "I-OZZM", registration: "I-OZZM", name: "I-OZZM", emptyWeightKg: 438.0, emptyWeightMomentKgm: 811.1 },
+            { id: "I-OZZN", registration: "I-OZZN", name: "I-OZZN", emptyWeightKg: 434.0, emptyWeightMomentKgm: 804.0 },
+            { id: "I-OZZP", registration: "I-OZZP", name: "I-OZZP", emptyWeightKg: 434.0, emptyWeightMomentKgm: 805.6 },
+            { id: "I-OZZQ", registration: "I-OZZQ", name: "I-OZZQ", emptyWeightKg: 433.0, emptyWeightMomentKgm: 803.4 },
+            { id: "I-OZZR", registration: "I-OZZR", name: "I-OZZR", emptyWeightKg: 445.0, emptyWeightMomentKgm: 822.9 },
+            { id: "I-OZZS", registration: "I-OZZS", name: "I-OZZS", emptyWeightKg: 443.0, emptyWeightMomentKgm: 820.1 },
+            { id: "I-OZZU", registration: "I-OZZU", name: "I-OZZU", emptyWeightKg: 444.0, emptyWeightMomentKgm: 827.6 },
+            { id: "I-OZZV", registration: "I-OZZV", name: "I-OZZV", emptyWeightKg: 444.0, emptyWeightMomentKgm: 825.8 },
+            { id: "I-OZZW", registration: "I-OZZW", name: "I-OZZW", emptyWeightKg: 442.0, emptyWeightMomentKgm: 824.8 }
+        ];
+
+        // --- Constants ---
+        const FUEL_ARM_M = 2.209;
+        const PILOT_PAX_ARM_M = 1.800;
+        const BAGGAGE_ARM_M = 2.417;
+        const COG_ADD_FACTOR_M = 1.566;
+        const MAX_WEIGHT_KG = 650.00;
+        const COG_MIN_FWD_M = 1.841;
+        const COG_MAX_AFT_M = 1.978;
+        const FUEL_DENSITY_KG_L = 0.72;
+        const MAX_FUEL_LITERS = 120;
+
+        // --- Helper Components ---
+        const InputField = ({ 
+            label, type = "number", value, onChange, placeholder, 
+            unit, min = "0", step = "any", readOnly = false, className = "",
+            secondaryValue, secondaryUnit 
+        }) => (
+            <div className={`mb-4 ${className}`}>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{label} {unit && `(${unit})`}</label>
+                <div className="flex items-center space-x-2">
+                    <input
+                        type={type}
+                        value={value}
+                        onChange={onChange}
+                        placeholder={placeholder}
+                        min={min}
+                        step={step}
+                        readOnly={readOnly}
+                        className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    />
+                    {secondaryValue !== undefined && (
+                        <span className="mt-1 text-sm text-gray-600 whitespace-nowrap">
+                            = {secondaryValue} {secondaryUnit}
+                        </span>
+                    )}
+                </div>
+            </div>
+        );
+
+        const Section = ({ title, children, className = "" }) => (
+            <div className={`bg-white shadow-md rounded-lg p-6 mb-6 ${className}`}>
+                <h2 className="text-xl font-semibold text-gray-800 mb-4 border-b pb-2">{title}</h2>
+                {children}
+            </div>
+        );
+
+        const CustomModal = ({ title, message, onClose }) => (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
+                <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md mx-4">
+                    <h3 className="text-xl font-semibold mb-4">{title}</h3>
+                    <p className="mb-6 whitespace-pre-wrap">{message}</p>
+                    <div className="flex justify-end">
+                        <button onClick={onClose} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">OK</button>
+                    </div>
+                </div>
+            </div>
+        );
+        
+        const getWeightTextColorClass = (currentWeight) => {
+            const weight = parseFloat(currentWeight);
+            if (isNaN(weight)) return 'text-gray-700';
+            if (weight > MAX_WEIGHT_KG) return 'text-red-700 font-bold';
+            if (weight === MAX_WEIGHT_KG) return 'text-red-600 font-bold';
+            if (weight >= 0.98 * MAX_WEIGHT_KG) return 'text-orange-500 font-semibold';
+            if (weight >= 0.90 * MAX_WEIGHT_KG) return 'text-yellow-500';
+            return 'text-green-600';
+        };
+
+        const getCoGTextColorClass = (distanceD_as_CoG) => {
+            const cogValue = parseFloat(distanceD_as_CoG);
+            if (isNaN(cogValue)) return 'text-gray-700';
+
+            if (cogValue < COG_MIN_FWD_M || cogValue > COG_MAX_AFT_M) return 'text-red-700 font-bold';
+
+            const midPoint = (COG_MIN_FWD_M + COG_MAX_AFT_M) / 2;
+            const halfRange = (COG_MAX_AFT_M - COG_MIN_FWD_M) / 2;
+            if (halfRange === 0) return 'text-green-600';
+
+            const deviation = Math.abs(cogValue - midPoint);
+            const deviationRatio = deviation / halfRange;
+
+            if (deviationRatio <= 0.3) return 'text-green-600';
+            if (deviationRatio <= 0.6) return 'text-yellow-500';
+            if (deviationRatio < 1.0) return 'text-orange-500 font-semibold';
+            return 'text-red-600 font-bold';
+        };
+
+        const LimitBar = ({ label, rawValue, type }) => {
+            let percentage = 0;
+            let barGradient = '';
+            let textColorClass = 'text-gray-700';
+            let indicatorVisible = true;
+            let hoverTitle = `Value: ${label}`;
+
+            if (type === 'weight') {
+                const weight = parseFloat(rawValue);
+                const scaleMax = MAX_WEIGHT_KG * 1.1;
+                percentage = Math.min(100, Math.max(0, (weight / scaleMax) * 100));
+                textColorClass = getWeightTextColorClass(weight);
+                barGradient = `linear-gradient(to right, #4ade80 0%, #4ade80 81.8%, #facc15 81.8%, #facc15 89%, #fb923c 89%, #fb923c 90.8%, #f87171 90.8%, #f87171 100%)`;
+                if (isNaN(weight)) indicatorVisible = false;
+                hoverTitle = `Weight: ${label} (${percentage.toFixed(1)}%)`;
+            } else if (type === 'cog') {
+                const cogValue = parseFloat(rawValue);
+                textColorClass = getCoGTextColorClass(cogValue);
+                barGradient = `linear-gradient(to right, #f87171 0%, #fb923c 15%, #facc15 30%, #4ade80 45%, #4ade80 55%, #facc15 70%, #fb923c 85%, #f87171 100%)`;
+
+                const actualCoGRange = COG_MAX_AFT_M - COG_MIN_FWD_M;
+                if (actualCoGRange > 0) {
+                    percentage = Math.min(100, Math.max(0, ((cogValue - COG_MIN_FWD_M) / actualCoGRange) * 100));
+                } else {
+                    percentage = (cogValue === COG_MIN_FWD_M) ? 50 : (cogValue < COG_MIN_FWD_M ? 0 : 100);
+                }
+                if (isNaN(cogValue)) indicatorVisible = false;
+                hoverTitle = `CoG (from D): ${label}m (${percentage.toFixed(1)}%)`;
+            }
+
+            return (
+                <div title={hoverTitle} className="relative w-full h-5 bg-gray-300 rounded my-1 group">
+                    <div className="absolute top-0 left-0 h-full rounded" style={{ background: barGradient, width: '100%' }}></div>
+                    {indicatorVisible && (
+                        <div
+                            className="absolute top-0 h-full w-0.5 bg-black opacity-75"
+                            style={{ left: `${percentage}%`, transform: 'translateX(-50%)' }}
+                        ></div>
+                    )}
+                    <span
+                        className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} group-hover:opacity-0 transition-opacity`}
+                    >
+                        {label}
+                    </span>
+                    <span
+                        className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} opacity-0 group-hover:opacity-100 transition-opacity bg-white bg-opacity-75 rounded px-1`}
+                    >
+                        {label}
+                    </span>
+                </div>
+            );
+        };
+
+
+        const App = () => {
+            const { useState, useEffect, useCallback } = React;
+
+            const [aircraftList, setAircraftList] = useState([]);
+            const [selectedAircraftId, setSelectedAircraftId] = useState('');
+            const [currentAircraft, setCurrentAircraft] = useState(null);
+
+            const [flightDate, setFlightDate] = useState(new Date().toISOString().slice(0, 10));
+            const [flightFrom, setFlightFrom] = useState('');
+            const [flightTo, setFlightTo] = useState('');
+
+            const [fuelTaxiL, setFuelTaxiL] = useState(2);
+            const [fuelTripL, setFuelTripL] = useState(30);
+            const [fuelAlternateL, setFuelAlternateL] = useState(7);
+            const [fuelReserveL, setFuelReserveL] = useState(10);
+            const [fuelContingencyL, setFuelContingencyL] = useState(5);
+            const [fuelExtraL, setFuelExtraL] = useState(0);
+
+            const [rampFuelKg, setRampFuelKg] = useState(0);
+            const [rampFuelL, setRampFuelL] = useState(0);
+            const [fuelWarning, setFuelWarning] = useState('');
+
+            const [pilotPaxWeightKg, setPilotPaxWeightKg] = useState(75);
+            const [baggageWeightKg, setBaggageWeightKg] = useState(0);
+
+            const [phaseResults, setPhaseResults] = useState(null);
+
+            const [userId, setUserId] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [isLoadingAircraft, setIsLoadingAircraft] = useState(true);
+            const [showAddAircraftModal, setShowAddAircraftModal] = useState(false);
+            const [newAircraftReg, setNewAircraftReg] = useState('');
+            const [newAircraftEW, setNewAircraftEW] = useState('');
+            const [newAircraftEM, setNewAircraftEM] = useState('');
+
+            const [modalInfo, setModalInfo] = useState({ show: false, title: '', message: '' });
+            const [isPdfLibraryAvailable, setIsPdfLibraryAvailable] = useState(false);
+
+            const showAlert = (title, message) => {
+                setModalInfo({ show: true, title, message });
+            };
+
+            useEffect(() => {
+                if (window.jspdf && typeof window.jspdf.jsPDF === 'function') {
+                    setIsPdfLibraryAvailable(true);
+                } else {
+                    setIsPdfLibraryAvailable(false);
+                    console.warn("jsPDF library not found on window object. PDF generation will be disabled.");
+                }
+            }, []);
+
+            useEffect(() => {
+                if (!auth) {
+                    setIsAuthReady(true);
+                    setUserId(crypto.randomUUID());
+                    return;
+                }
+                auth.onAuthStateChanged(user => {
+                    if (user) {
+                        setUserId(user.uid);
+                    } else {
+                        auth.signInAnonymously().catch(error => {
+                            console.error("Error signing in anonymously:", error);
+                            setUserId(crypto.randomUUID());
+                        });
+                    }
+                    setIsAuthReady(true);
+                });
+            }, []);
+
+            useEffect(() => {
+                if (!db || !isAuthReady || !userId) {
+                    setAircraftList(initialAircraftData);
+                    setIsLoadingAircraft(false);
+                    if (initialAircraftData.length > 0) {
+                        setSelectedAircraftId(initialAircraftData[0].id);
+                    }
+                    return;
+                }
+                const aircraftCollectionRef = db.collection(`artifacts/${appId}/users/${userId}/${AIRCRAFT_COLLECTION_NAME}`);
+                const setupInitialDataAndSubscribe = async () => {
+                    try {
+                        const snapshot = await aircraftCollectionRef.get();
+                        if (snapshot.empty) {
+                            console.log("Populating Firestore with initial aircraft data (full fleet)...");
+                            const batch = db.batch();
+                            initialAircraftData.forEach(craft => {
+                                const docRef = aircraftCollectionRef.doc(craft.registration);
+                                batch.set(docRef, craft);
+                            });
+                            await batch.commit();
+                        }
+                    } catch (error) { console.error("Error checking/populating initial aircraft data:", error); }
+                    
+                    const unsubscribe = aircraftCollectionRef.onSnapshot(querySnapshot => {
+                        const fetchedAircraft = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setAircraftList(fetchedAircraft);
+                        setIsLoadingAircraft(false);
+                        if (fetchedAircraft.length > 0 && !selectedAircraftId) {
+                            setSelectedAircraftId(fetchedAircraft[0].id);
+                        } else if (fetchedAircraft.length === 0) {
+                            setSelectedAircraftId('');
+                            setCurrentAircraft(null);
+                        }
+                    }, error => {
+                        console.error("Error fetching aircraft from Firestore:", error);
+                        setAircraftList(initialAircraftData);
+                        setIsLoadingAircraft(false);
+                        if (initialAircraftData.length > 0) {
+                            setSelectedAircraftId(initialAircraftData[0].id);
+                        }
+                    });
+                    return unsubscribe;
+                };
+                const unsubscribePromise = setupInitialDataAndSubscribe();
+                return () => { unsubscribePromise.then(unsub => { if (unsub) unsub(); }); };
+            }, [isAuthReady, userId]);
+
+            useEffect(() => {
+                const foundAircraft = aircraftList.find(ac => ac.id === selectedAircraftId);
+                setCurrentAircraft(foundAircraft || null);
+            }, [selectedAircraftId, aircraftList]);
+
+            useEffect(() => {
+                const taxiL = parseFloat(fuelTaxiL) || 0;
+                const tripL = parseFloat(fuelTripL) || 0;
+                const alternateL = parseFloat(fuelAlternateL) || 0;
+                const reserveL = parseFloat(fuelReserveL) || 0;
+                const contingencyL = parseFloat(fuelContingencyL) || 0;
+                const extraL = parseFloat(fuelExtraL) || 0;
+                const totalL = taxiL + tripL + alternateL + reserveL + contingencyL + extraL;
+                setRampFuelL(parseFloat(totalL.toFixed(2)));
+                setRampFuelKg(parseFloat((totalL * FUEL_DENSITY_KG_L).toFixed(2)));
+                if (totalL > MAX_FUEL_LITERS) {
+                    setFuelWarning(`Warning: Total fuel (${totalL.toFixed(2)}L) exceeds max tank capacity (${MAX_FUEL_LITERS}L).`);
+                } else {
+                    setFuelWarning('');
+                }
+            }, [fuelTaxiL, fuelTripL, fuelAlternateL, fuelReserveL, fuelContingencyL, fuelExtraL]);
+
+            const handleAddAircraft = async () => {
+                if (!db || !userId) { showAlert("Database Error", "Database not available."); return; }
+                if (!newAircraftReg || !newAircraftEW || !newAircraftEM) { showAlert("Input Error", "Please fill all aircraft fields."); return; }
+                const newCraft = { registration: newAircraftReg.toUpperCase(), name: newAircraftReg.toUpperCase(), emptyWeightKg: parseFloat(newAircraftEW), emptyWeightMomentKgm: parseFloat(newAircraftEM) };
+                try {
+                    await db.collection(`artifacts/${appId}/users/${userId}/${AIRCRAFT_COLLECTION_NAME}`).doc(newCraft.registration).set(newCraft);
+                    setNewAircraftReg(''); setNewAircraftEW(''); setNewAircraftEM(''); setShowAddAircraftModal(false);
+                } catch (error) { console.error("Error adding aircraft:", error); showAlert("Firestore Error", "Failed to add aircraft."); }
+            };
+
+            const calculatePhaseMB = useCallback((aircraft, fuelForPhaseKg, pilotPaxKg, baggageKg) => {
+                if (!aircraft) return null;
+                const ewKg = aircraft.emptyWeightKg, ewMomKgm = aircraft.emptyWeightMomentKgm;
+                const ewArmM = ewKg > 0 ? ewMomKgm / ewKg : 0;
+                const fuelMomKgm = fuelForPhaseKg * FUEL_ARM_M;
+                const pilotPaxMomKgm = pilotPaxKg * PILOT_PAX_ARM_M;
+                const baggageMomKgm = baggageKg * BAGGAGE_ARM_M;
+                const totalWeightNum = ewKg + fuelForPhaseKg + pilotPaxKg + baggageKg;
+                const totalMoment = ewMomKgm + fuelMomKgm + pilotPaxMomKgm + baggageMomKgm;
+                const distanceDNum = totalWeightNum > 0 ? totalMoment / totalWeightNum : 0;
+                const finalCoGForUI = distanceDNum;
+                let status = [];
+                if (totalWeightNum > MAX_WEIGHT_KG) status.push(`OVERWEIGHT (${totalWeightNum.toFixed(2)}kg > ${MAX_WEIGHT_KG.toFixed(2)}kg)`);
+                if (finalCoGForUI < COG_MIN_FWD_M) status.push(`CoG FWD LIMIT (${finalCoGForUI.toFixed(3)}m < ${COG_MIN_FWD_M.toFixed(3)}m)`);
+                else if (finalCoGForUI > COG_MAX_AFT_M) status.push(`CoG AFT LIMIT (${finalCoGForUI.toFixed(3)}m > ${COG_MAX_AFT_M.toFixed(3)}m)`);
+                return {
+                    emptyWeight: { weight: ewKg.toFixed(2), arm: ewArmM.toFixed(3), moment: ewMomKgm.toFixed(2) },
+                    fuel: { weight: fuelForPhaseKg.toFixed(2), arm: FUEL_ARM_M.toFixed(3), moment: fuelMomKgm.toFixed(2) },
+                    pilotPax: { weight: pilotPaxKg.toFixed(2), arm: PILOT_PAX_ARM_M.toFixed(3), moment: pilotPaxMomKgm.toFixed(2) },
+                    baggage: { weight: baggageKg.toFixed(2), arm: BAGGAGE_ARM_M.toFixed(3), moment: baggageMomKgm.toFixed(2) },
+                    totalWeight: totalWeightNum.toFixed(2), totalWeightRaw: totalWeightNum, totalMoment: totalMoment.toFixed(2),
+                    distanceD: distanceDNum.toFixed(3), distanceDRaw: distanceDNum, finalCoG: finalCoGForUI.toFixed(3),
+                    validationStatus: status.length === 0 ? 'Within Limits' : status.join('\n'),
+                };
+            }, []);
+
+            const calculateAllPhasesMassAndBalance = useCallback(() => {
+                if (!currentAircraft) { setPhaseResults(null); return; }
+                const pilotPax = parseFloat(pilotPaxWeightKg) || 0;
+                const baggage = parseFloat(baggageWeightKg) || 0;
+                const taxiBurn = (parseFloat(fuelTaxiL) || 0) * FUEL_DENSITY_KG_L;
+                const tripBurn = (parseFloat(fuelTripL) || 0) * FUEL_DENSITY_KG_L;
+                const altBurn = (parseFloat(fuelAlternateL) || 0) * FUEL_DENSITY_KG_L;
+                const departureFuel = rampFuelKg;
+                const arrivalFuel = Math.max(0, departureFuel - tripBurn - taxiBurn);
+                const alternateFuel = Math.max(0, arrivalFuel - altBurn);
+                setPhaseResults({
+                    departure: calculatePhaseMB(currentAircraft, departureFuel, pilotPax, baggage),
+                    arrival: calculatePhaseMB(currentAircraft, arrivalFuel, pilotPax, baggage),
+                    alternate: calculatePhaseMB(currentAircraft, alternateFuel, pilotPax, baggage),
+                });
+            }, [currentAircraft, rampFuelKg, pilotPaxWeightKg, baggageWeightKg, fuelTaxiL, fuelTripL, fuelAlternateL, calculatePhaseMB]);
+
+            useEffect(() => { calculateAllPhasesMassAndBalance(); }, [calculateAllPhasesMassAndBalance]);
+
+            const generatePdf = () => {
+                try {
+                    if (!phaseResults || !phaseResults.departure || !currentAircraft) {
+                        showAlert("PDF Error", "Departure M&B data not available."); return;
+                    }
+                    if (!isPdfLibraryAvailable) {
+                        showAlert("PDF Generation Unavailable", "The jsPDF library is not loaded in this environment. To use this feature, please ensure the page includes the jsPDF script, or host the application in an environment where you can install it as a dependency.");
+                        return;
+                    }
+                    const { jsPDF: JSPDF_CONSTRUCTOR } = window.jspdf;
+                    const doc = new JSPDF_CONSTRUCTOR();
+                    const departureData = phaseResults.departure;
+                    const finalCoGForPDF = (parseFloat(departureData.distanceDRaw) + COG_ADD_FACTOR_M).toFixed(3);
+                    
+                    const drawText = (text, x, y, size = 10, style = 'normal', align = 'left') => {
+                        doc.setFontSize(size); doc.setFont('helvetica', style); doc.text(text, x, y, { align });
+                    };
+                    const drawMBForm = (offsetX) => {
+                        drawText("COSTRUZIONI AERONAUTICHE", offsetX + 50, 15, 10, 'bold', 'center');
+                        drawText("TECNAM P2008 JC - Aircraft Flight Manual", offsetX + 50, 20, 9, 'normal', 'center');
+                        doc.rect(offsetX + 5, 25, 90, 20);
+                        drawText(`Date: ${flightDate}`, offsetX + 7, 30, 9);
+                        drawText(`Registration: ${currentAircraft.registration}`, offsetX + 7, 35, 9);
+                        drawText(`From/To: ${flightFrom} / ${flightTo}`, offsetX + 7, 40, 9);
+                        drawText("CoG Position Computation Chart", offsetX + 50, 50, 10, 'bold', 'center');
+                        const tableStartY = 55, col1X = offsetX + 5, col2X = offsetX + 45, col3X = offsetX + 65, col4X = offsetX + 85;
+                        drawText("Weight (kg)", col2X, tableStartY, 8, 'bold', 'center'); drawText("Arm (m)*", col3X, tableStartY, 8, 'bold', 'center'); drawText("Moment (kg*m)", col4X, tableStartY, 8, 'bold', 'center');
+                        doc.line(offsetX + 5, tableStartY + 3, offsetX + 95, tableStartY + 3);
+                        let currentY = tableStartY + 8; const rowHeight = 6;
+                        const drawRow = (label, itemData) => {
+                            drawText(label, col1X, currentY, 9); drawText(itemData.weight, col2X, currentY, 9, 'normal', 'center');
+                            drawText(itemData.arm, col3X, currentY, 9, 'normal', 'center'); drawText(itemData.moment, col4X, currentY, 9, 'normal', 'center');
+                            doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        };
+                        drawRow("EmptyWeight", departureData.emptyWeight); drawRow("Fuel", departureData.fuel);
+                        drawRow("Pilot&Passenger", departureData.pilotPax); drawRow("Baggage", departureData.baggage);
+                        currentY += rowHeight / 2;
+                        drawText("Total MOMENT", col1X, currentY, 9); drawText(departureData.totalMoment, col4X, currentY, 9, 'normal', 'center');
+                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        drawText("Total WEIGHT", col1X, currentY, 9); drawText(departureData.totalWeight, col2X, currentY, 9, 'normal', 'center');
+                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        currentY += rowHeight / 2;
+                        drawText(`Distance "D"= MOMENT/WEIGHT`, col1X, currentY, 9); drawText(departureData.distanceD, col4X, currentY, 9, 'normal', 'center');
+                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        drawText(`*ADD to the distance "D" the value 1.566m (62in)`, offsetX + 7, currentY, 7); currentY += rowHeight;
+                        drawText(`Calculated Final CoG: ${finalCoGForPDF} m`, offsetX + 7, currentY, 9, 'bold'); currentY += rowHeight;
+                        doc.rect(offsetX + 5, currentY, 90, 15);
+                        drawText("C.G.Range", offsetX + 7, currentY + 4, 8, 'bold'); drawText("Max FWD", offsetX + 35, currentY + 4, 8, 'bold'); drawText("Max AFT", offsetX + 55, currentY + 4, 8, 'bold');
+                        drawText("Meters", offsetX + 7, currentY + 9, 8); drawText(COG_MIN_FWD_M.toFixed(3), offsetX + 35, currentY + 9, 8); drawText(COG_MAX_AFT_M.toFixed(3), offsetX + 55, currentY + 9, 8);
+                        currentY += 17;
+                        doc.rect(offsetX + 5, currentY, 90, 10);
+                        drawText("Max Weight", offsetX + 7, currentY + 4, 8, 'bold'); drawText("Kilograms", offsetX + 55, currentY + 4, 8, 'bold');
+                        drawText(MAX_WEIGHT_KG.toFixed(2), offsetX + 55, currentY + 8, 8); currentY += 12;
+                        const statusColor = departureData.validationStatus === 'Within Limits' ? [0,0,0] : [255,0,0];
+                        doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+                        drawText(`Status: ${departureData.validationStatus.split('\n')[0]}`, offsetX + 7, currentY, 9, 'normal');
+                        doc.setTextColor(0,0,0); currentY += 10;
+                        drawText("Signature: ________________________", offsetX + 7, currentY, 9); currentY += 10;
+                        drawText("Section 6 - Weight and balance", offsetX + 50, currentY, 8, 'bold', 'center');
+                    };
+                    drawMBForm(10);
+                    doc.save(`P2008JC_MassBalance_${currentAircraft.registration}_${flightDate}.pdf`);
+                } catch (error) {
+                    console.error("Error during PDF generation:", error);
+                    showAlert("PDF Generation Error", `An error occurred while generating the PDF: ${error.message}. Check console for details.`);
+                }
+            };
+            
+            if (!isAuthReady || isLoadingAircraft) return <div className="p-8 text-center text-xl">Loading Application...</div>;
+
+            return (
+                <div className="container mx-auto p-4 font-sans bg-gray-50 min-h-screen">
+                    {modalInfo.show && <CustomModal title={modalInfo.title} message={modalInfo.message} onClose={() => setModalInfo({ show: false, title: '', message: '' })} />}
+                    <header className="text-center mb-8">
+                        <h1 className="text-3xl font-bold text-indigo-700">TECNAM P2008JC Mass & Balance Calculator</h1>
+                    </header>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1 space-y-6">
+                             <Section title="Flight Information & Aircraft">
+                                <div className="flex items-end space-x-2">
+                                    <div className="flex-grow">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Aircraft Registration</label>
+                                        <select value={selectedAircraftId} onChange={e => setSelectedAircraftId(e.target.value)}
+                                            className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                            <option value="">Select Aircraft</option>
+                                            {aircraftList.map(ac => <option key={ac.id} value={ac.id}>{ac.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <button onClick={() => setShowAddAircraftModal(true)} className="h-10 px-3 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm">Add</button>
+                                </div>
+                                {currentAircraft && (
+                                    <div className="mt-3 p-3 bg-indigo-50 rounded-md text-sm">
+                                        <p><strong>Selected:</strong> {currentAircraft.name}</p>
+                                        <p><strong>EW:</strong> {currentAircraft.emptyWeightKg} kg, <strong>EM:</strong> {currentAircraft.emptyWeightMomentKgm} kg*m</p>
+                                    </div>
+                                )}
+                                <InputField label="Date" type="date" value={flightDate} onChange={e => setFlightDate(e.target.value)} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <InputField label="From (ICAO)" type="text" value={flightFrom} onChange={e => setFlightFrom(e.target.value.toUpperCase())} placeholder="LIPE" />
+                                    <InputField label="To (ICAO)" type="text" value={flightTo} onChange={e => setFlightTo(e.target.value.toUpperCase())} placeholder="LIPZ" />
+                                </div>
+                            </Section>
+                            <Section title="Fuel Calculator">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+                                    <InputField label="Taxi" unit="L" value={fuelTaxiL} onChange={e => setFuelTaxiL(e.target.value)} secondaryValue={(parseFloat(fuelTaxiL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                    <InputField label="Trip" unit="L" value={fuelTripL} onChange={e => setFuelTripL(e.target.value)} secondaryValue={(parseFloat(fuelTripL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                    <InputField label="Alternate" unit="L" value={fuelAlternateL} onChange={e => setFuelAlternateL(e.target.value)} secondaryValue={(parseFloat(fuelAlternateL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                    <InputField label="Final Reserve" unit="L" value={fuelReserveL} onChange={e => setFuelReserveL(e.target.value)} secondaryValue={(parseFloat(fuelReserveL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                    <InputField label="Contingency" unit="L" value={fuelContingencyL} onChange={e => setFuelContingencyL(e.target.value)} secondaryValue={(parseFloat(fuelContingencyL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                    <InputField label="Extra" unit="L" value={fuelExtraL} onChange={e => setFuelExtraL(e.target.value)} secondaryValue={(parseFloat(fuelExtraL || 0) * FUEL_DENSITY_KG_L).toFixed(2)} secondaryUnit="kg" />
+                                </div>
+                                <div className="mt-3">
+                                    <p className="text-indigo-700 font-semibold">Calculated Ramp Fuel: {rampFuelL.toFixed(2)} L ({rampFuelKg.toFixed(2)} kg)</p>
+                                    {fuelWarning && (<p className="text-red-600 text-sm font-semibold mt-1">{fuelWarning}</p>)}
+                                </div>
+                            </Section>
+                            <Section title="Other Weights">
+                                <InputField label="Pilot & Passenger(s) Total Weight" unit="kg" value={pilotPaxWeightKg} onChange={e => setPilotPaxWeightKg(e.target.value)} />
+                                <InputField label="Baggage Weight" unit="kg" value={baggageWeightKg} onChange={e => setBaggageWeightKg(e.target.value)} />
+                            </Section>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <Section title="Mass & Balance Multi-Phase Results" className="overflow-x-auto">
+                                {currentAircraft && phaseResults ? (
+                                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                        <thead className="bg-gray-100">
+                                            <tr><th className="px-2 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider align-bottom sticky left-0 bg-gray-100 z-10">Item</th>
+                                                {['Departure', 'Arrival', 'Alternate'].map(phase => (<th key={phase} className={`px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider ${phase !== 'Departure' ? 'border-l border-gray-300' : ''}`} colSpan="3">{phase}</th>))}
+                                            </tr>
+                                            <tr><th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-100 z-10"></th>
+                                                {['Departure', 'Arrival', 'Alternate'].map(phase => (<React.Fragment key={`${phase}-sub`}>
+                                                    <th className={`px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase ${phase !== 'Departure' ? 'border-l border-gray-300' : ''}`}>Wt (kg)</th>
+                                                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Arm (m)</th>
+                                                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Mom (kg*m)</th>
+                                                </React.Fragment>))}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {['emptyWeight', 'fuel', 'pilotPax', 'baggage'].map(itemKey => (<tr key={itemKey}><td className="px-2 py-2 capitalize sticky left-0 bg-white z-10">{itemKey.replace(/([A-Z])/g, ' $1').trim()}</td>
+                                                {['departure', 'arrival', 'alternate'].map((phaseKey, idx) => (<React.Fragment key={`${itemKey}-${phaseKey}`}>
+                                                    {RenderPhaseDataCell(phaseResults[phaseKey], itemKey, 'weight', 'text-right', idx > 0)}
+                                                    {RenderPhaseDataCell(phaseResults[phaseKey], itemKey, 'arm')}
+                                                    {RenderPhaseDataCell(phaseResults[phaseKey], itemKey, 'moment')}
+                                                </React.Fragment>))}
+                                            </tr>))}
+                                            <tr className="bg-gray-50 font-semibold"><td className="px-2 py-2 sticky left-0 bg-gray-50 z-10">Total MOMENT</td>
+                                                {['departure', 'arrival', 'alternate'].map((phaseKey, idx) => (<React.Fragment key={`totalMoment-${phaseKey}`}>
+                                                    <td className={`px-2 py-2 text-right ${idx > 0 ? 'border-l border-gray-300' : ''}`}>-</td><td className="px-2 py-2 text-right">-</td>
+                                                    {RenderPhaseSummaryCell(phaseResults[phaseKey], 'totalMoment', 'text-right')}
+                                                </React.Fragment>))}
+                                            </tr>
+                                            <tr className="bg-gray-50 font-semibold"><td className="px-2 py-2 sticky left-0 bg-gray-50 z-10">Total WEIGHT</td>
+                                                {['departure', 'arrival', 'alternate'].map((phaseKey, idx) => (<td colSpan="3" className={`px-1 py-0 text-center ${idx > 0 ? 'border-l border-gray-300' : ''}`} key={`totalWeightBar-${phaseKey}`}>
+                                                    {phaseResults[phaseKey] ? (<LimitBar label={phaseResults[phaseKey].totalWeight} rawValue={phaseResults[phaseKey].totalWeightRaw} type="weight" />) : '-'}
+                                                </td>))}
+                                            </tr>
+                                            <tr className="bg-gray-50"><td className="px-2 py-2 sticky left-0 bg-gray-50 z-10">CoG / "Distance D" (m)</td>
+                                                {['departure', 'arrival', 'alternate'].map((phaseKey, idx) => (<td colSpan="3" className={`px-1 py-0 text-center ${idx > 0 ? 'border-l border-gray-300' : ''}`} key={`distanceDBar-${phaseKey}`}>
+                                                    {phaseResults[phaseKey] ? (<LimitBar label={phaseResults[phaseKey].finalCoG} rawValue={phaseResults[phaseKey].distanceDRaw} type="cog" />) : '-'}
+                                                </td>))}
+                                            </tr>
+                                            <tr className="bg-gray-100 text-xs"><td className="px-2 py-1 sticky left-0 bg-gray-100 z-10 italic">CoG / Status</td>
+                                                {['departure', 'arrival', 'alternate'].map((phaseKey, idx) => {
+                                                    const data = phaseResults[phaseKey];
+                                                    if (!data) return <td colSpan="3" className={`px-2 py-1 text-center italic ${idx > 0 ? 'border-l border-gray-300' : ''}`} key={`valStatus-${phaseKey}`}>-</td>;
+                                                    const textColor = getCoGTextColorClass(data.distanceDRaw); const coGText = `${data.finalCoG}m`; const rangeText = `(Range: ${COG_MIN_FWD_M}-${COG_MAX_AFT_M}m)`;
+                                                    return (<td colSpan="3" className={`px-2 py-1 text-center ${idx > 0 ? 'border-l border-gray-300' : ''}`} key={`valStatus-${phaseKey}`}>
+                                                        <div className={`${textColor} font-semibold`}>{coGText}</div><div className="text-gray-500">{rangeText}</div>
+                                                        {data.validationStatus !== 'Within Limits' && (<div className={`italic ${ (data.validationStatus.includes("OVERWEIGHT")) ? getWeightTextColorClass(data.totalWeightRaw) : textColor }`}>{data.validationStatus.split('\n')[0]}</div>)}
+                                                    </td>);
+                                                })}
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                ) : (<p className="p-4 text-center">Select aircraft and input data to see results.</p>)}
+                                <div className="mt-4 p-3 text-xs text-gray-600 bg-gray-50 rounded-md">
+                                    <p><strong>Max Weight:</strong> {MAX_WEIGHT_KG.toFixed(2)} kg. <strong>CoG Range (for "Distance D"):</strong> {COG_MIN_FWD_M.toFixed(3)}m to {COG_MAX_AFT_M.toFixed(3)}m.</p>
+                                    <p><strong>Ramp Fuel</strong> is total planned fuel. <strong>Departure Fuel</strong> for M&B is Ramp Fuel. <strong>Arrival Fuel</strong> = Ramp - Taxi Burn - Trip Burn. <strong>Alternate Fuel</strong> = Arrival - Alternate Burn.</p>
+                                    <p className="mt-1"><strong>Bar Color Key:</strong> Gradient indicates proximity to limits. Text color: <span className="text-green-600">Green</span> (Good), <span className="text-yellow-500">Yellow</span> (Caution), <span className="text-orange-500">Orange</span> (Warning), <span className="text-red-700">Red</span> (Limit Exceeded/Critical).</p>
+                                    {!isPdfLibraryAvailable && (<p className="mt-2 text-orange-600 font-semibold">PDF Generation is currently unavailable as the jsPDF library could not be loaded in this environment.</p>)}
+                                </div>
+                            </Section>
+                            <div className="mt-6 text-center">
+                                <button onClick={generatePdf} disabled={!phaseResults || !phaseResults.departure || !isPdfLibraryAvailable}
+                                    className={`w-full px-6 py-3 text-white font-semibold rounded-md shadow-md transition duration-150 ${
+                                        (!phaseResults || !phaseResults.departure || !isPdfLibraryAvailable)
+                                        ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2'
+                                    }`}
+                                    title={!isPdfLibraryAvailable ? "PDF library not available" : ((!phaseResults || !phaseResults.departure) ? "Calculate M&B first" : "Generate PDF")}
+                                >Generate PDF (Departure M&B)</button>
+                            </div>
+                        </div>
+                    </div>
+                    {showAddAircraftModal && (<div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
+                        <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md mx-4">
+                            <h3 className="text-xl font-semibold mb-4">Add New Aircraft</h3>
+                            <InputField label="Registration" type="text" value={newAircraftReg} onChange={e => setNewAircraftReg(e.target.value.toUpperCase())} placeholder="I-XXXX" />
+                            <InputField label="Empty Weight (kg)" type="number" value={newAircraftEW} onChange={e => setNewAircraftEW(e.target.value)} placeholder="430" />
+                            <InputField label="Empty Weight Moment (kg*m)" type="number" value={newAircraftEM} onChange={e => setNewAircraftEM(e.target.value)} placeholder="790.5" />
+                            <div className="mt-6 flex justify-end space-x-3">
+                                <button onClick={() => setShowAddAircraftModal(false)} className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400">Cancel</button>
+                                <button onClick={handleAddAircraft} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Add Aircraft</button>
+                            </div>
+                        </div>
+                    </div>)}
+                </div>
+            );
+        };
+        
+        // Use renamed helper components to avoid conflict with React's own
+        const RenderPhaseDataCell = (data, itemKey, subKey, textAlign = 'text-right', isFirstColOfPhase = false) => {
+            if (!data || !data[itemKey]) return <td className={`px-2 py-2 ${textAlign} ${isFirstColOfPhase ? 'border-l border-gray-300' : ''}`}>-</td>;
+            const value = data[itemKey][subKey];
+            return <td className={`px-2 py-2 ${textAlign} ${isFirstColOfPhase ? 'border-l border-gray-300' : ''}`}>{value !== undefined && value !== null ? value : '-'}</td>;
+        };
+            
+        const RenderPhaseSummaryCell = (data, key, textAlign = 'text-right', isFirstColOfPhase = false) => {
+            if (!data) return <td className={`px-2 py-2 ${textAlign} ${isFirstColOfPhase ? 'border-l border-gray-300' : ''}`}>-</td>;
+            const value = data[key];
+            return <td className={`px-2 py-2 ${textAlign} ${isFirstColOfPhase ? 'border-l border-gray-300' : ''}`}>{value !== undefined && value !== null ? value : '-'}</td>;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+    </script>
+
+</body>
+</html>
