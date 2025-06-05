@@ -22,7 +22,6 @@
     <script type="text/babel">
 
         // --- Firebase Configuration ---
-        // IMPORTANT: Replace with your actual Firebase project config
         const firebaseConfig = {
             apiKey: "YOUR_API_KEY", 
             authDomain: "YOUR_AUTH_DOMAIN",
@@ -32,10 +31,8 @@
             appId: "YOUR_APP_ID"
         };
         
-        // --- App ID (for Firestore paths) ---
         const appId = 'p2008jc-mass-balance-default';
 
-        // --- Initialize Firebase ---
         let db;
         let auth;
         try {
@@ -46,7 +43,6 @@
             console.error("Error initializing Firebase:", error);
         }
 
-        // --- Aircraft Data ---
         const AIRCRAFT_COLLECTION_NAME = 'p2008jc_aircraft_fleet';
         const initialAircraftData = [
             { id: "I-OZZD", registration: "I-OZZD", name: "I-OZZD", emptyWeightKg: 432.0, emptyWeightMomentKgm: 792.7 },
@@ -67,7 +63,6 @@
             { id: "I-OZZW", registration: "I-OZZW", name: "I-OZZW", emptyWeightKg: 442.0, emptyWeightMomentKgm: 824.8 }
         ];
 
-        // --- Constants ---
         const FUEL_ARM_M = 2.209;
         const PILOT_PAX_ARM_M = 1.800;
         const BAGGAGE_ARM_M = 2.417;
@@ -78,7 +73,6 @@
         const FUEL_DENSITY_KG_L = 0.72;
         const MAX_FUEL_LITERS = 120;
 
-        // --- Helper Components ---
         const InputField = ({ 
             label, type = "number", value, onChange, placeholder, 
             unit, min = "0", step = "any", readOnly = false, className = "",
@@ -91,7 +85,7 @@
                         type={type}
                         value={value}
                         onChange={onChange}
-                        placeholder={placeholder}
+                        placeholder={placeholder || (type === "number" ? "0" : "")}
                         min={min}
                         step={step}
                         readOnly={readOnly}
@@ -138,16 +132,12 @@
         const getCoGTextColorClass = (distanceD_as_CoG) => {
             const cogValue = parseFloat(distanceD_as_CoG);
             if (isNaN(cogValue)) return 'text-gray-700';
-
             if (cogValue < COG_MIN_FWD_M || cogValue > COG_MAX_AFT_M) return 'text-red-700 font-bold';
-
             const midPoint = (COG_MIN_FWD_M + COG_MAX_AFT_M) / 2;
             const halfRange = (COG_MAX_AFT_M - COG_MIN_FWD_M) / 2;
             if (halfRange === 0) return 'text-green-600';
-
             const deviation = Math.abs(cogValue - midPoint);
             const deviationRatio = deviation / halfRange;
-
             if (deviationRatio <= 0.3) return 'text-green-600';
             if (deviationRatio <= 0.6) return 'text-yellow-500';
             if (deviationRatio < 1.0) return 'text-orange-500 font-semibold';
@@ -155,86 +145,54 @@
         };
 
         const LimitBar = ({ label, rawValue, type }) => {
-            let percentage = 0;
-            let barGradient = '';
-            let textColorClass = 'text-gray-700';
-            let indicatorVisible = true;
-            let hoverTitle = `Value: ${label}`;
-
+            let percentage = 0, barGradient = '', textColorClass = 'text-gray-700', indicatorVisible = true, hoverTitle = `Value: ${label}`;
             if (type === 'weight') {
-                const weight = parseFloat(rawValue);
-                const scaleMax = MAX_WEIGHT_KG * 1.1;
+                const weight = parseFloat(rawValue); const scaleMax = MAX_WEIGHT_KG * 1.1;
                 percentage = Math.min(100, Math.max(0, (weight / scaleMax) * 100));
                 textColorClass = getWeightTextColorClass(weight);
                 barGradient = `linear-gradient(to right, #4ade80 0%, #4ade80 81.8%, #facc15 81.8%, #facc15 89%, #fb923c 89%, #fb923c 90.8%, #f87171 90.8%, #f87171 100%)`;
                 if (isNaN(weight)) indicatorVisible = false;
                 hoverTitle = `Weight: ${label} (${percentage.toFixed(1)}%)`;
             } else if (type === 'cog') {
-                const cogValue = parseFloat(rawValue);
-                textColorClass = getCoGTextColorClass(cogValue);
+                const cogValue = parseFloat(rawValue); textColorClass = getCoGTextColorClass(cogValue);
                 barGradient = `linear-gradient(to right, #f87171 0%, #fb923c 15%, #facc15 30%, #4ade80 45%, #4ade80 55%, #facc15 70%, #fb923c 85%, #f87171 100%)`;
-
                 const actualCoGRange = COG_MAX_AFT_M - COG_MIN_FWD_M;
-                if (actualCoGRange > 0) {
-                    percentage = Math.min(100, Math.max(0, ((cogValue - COG_MIN_FWD_M) / actualCoGRange) * 100));
-                } else {
-                    percentage = (cogValue === COG_MIN_FWD_M) ? 50 : (cogValue < COG_MIN_FWD_M ? 0 : 100);
-                }
+                if (actualCoGRange > 0) percentage = Math.min(100, Math.max(0, ((cogValue - COG_MIN_FWD_M) / actualCoGRange) * 100));
+                else percentage = (cogValue === COG_MIN_FWD_M) ? 50 : (cogValue < COG_MIN_FWD_M ? 0 : 100);
                 if (isNaN(cogValue)) indicatorVisible = false;
                 hoverTitle = `CoG (from D): ${label}m (${percentage.toFixed(1)}%)`;
             }
-
-            return (
-                <div title={hoverTitle} className="relative w-full h-5 bg-gray-300 rounded my-1 group">
-                    <div className="absolute top-0 left-0 h-full rounded" style={{ background: barGradient, width: '100%' }}></div>
-                    {indicatorVisible && (
-                        <div
-                            className="absolute top-0 h-full w-0.5 bg-black opacity-75"
-                            style={{ left: `${percentage}%`, transform: 'translateX(-50%)' }}
-                        ></div>
-                    )}
-                    <span
-                        className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} group-hover:opacity-0 transition-opacity`}
-                    >
-                        {label}
-                    </span>
-                    <span
-                        className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} opacity-0 group-hover:opacity-100 transition-opacity bg-white bg-opacity-75 rounded px-1`}
-                    >
-                        {label}
-                    </span>
-                </div>
-            );
+            return (<div title={hoverTitle} className="relative w-full h-5 bg-gray-300 rounded my-1 group">
+                <div className="absolute top-0 left-0 h-full rounded" style={{ background: barGradient, width: '100%' }}></div>
+                {indicatorVisible && <div className="absolute top-0 h-full w-0.5 bg-black opacity-75" style={{ left: `${percentage}%`, transform: 'translateX(-50%)' }}></div>}
+                <span className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} group-hover:opacity-0 transition-opacity`}>{label}</span>
+                <span className={`absolute inset-0 flex items-center justify-center text-xs font-medium ${textColorClass} opacity-0 group-hover:opacity-100 transition-opacity bg-white bg-opacity-75 rounded px-1`}>{label}</span>
+            </div>);
         };
-
 
         const App = () => {
             const { useState, useEffect, useCallback } = React;
-
             const [aircraftList, setAircraftList] = useState([]);
             const [selectedAircraftId, setSelectedAircraftId] = useState('');
             const [currentAircraft, setCurrentAircraft] = useState(null);
-
             const [flightDate, setFlightDate] = useState(new Date().toISOString().slice(0, 10));
             const [flightFrom, setFlightFrom] = useState('');
             const [flightTo, setFlightTo] = useState('');
+            const [alternateAirportIcao, setAlternateAirportIcao] = useState(''); 
 
-            const [fuelTaxiL, setFuelTaxiL] = useState(2);
-            const [fuelTripL, setFuelTripL] = useState(30);
-            const [fuelAlternateL, setFuelAlternateL] = useState(7);
-            const [fuelReserveL, setFuelReserveL] = useState(10);
-            const [fuelContingencyL, setFuelContingencyL] = useState(5);
-            const [fuelExtraL, setFuelExtraL] = useState(0);
-
+            const [fuelTaxiL, setFuelTaxiL] = useState(''); // Default to empty
+            const [fuelTripL, setFuelTripL] = useState(''); // Default to empty
+            const [fuelAlternateL, setFuelAlternateL] = useState(''); // Default to empty
+            const [fuelReserveL, setFuelReserveL] = useState(''); // Default to empty
+            const [fuelContingencyL, setFuelContingencyL] = useState(''); // Default to empty
+            const [fuelExtraL, setFuelExtraL] = useState(''); // Default to empty
             const [rampFuelKg, setRampFuelKg] = useState(0);
             const [rampFuelL, setRampFuelL] = useState(0);
             const [fuelWarning, setFuelWarning] = useState('');
 
-            const [pilotPaxWeightKg, setPilotPaxWeightKg] = useState(75);
-            const [baggageWeightKg, setBaggageWeightKg] = useState(0);
-
+            const [pilotPaxWeightKg, setPilotPaxWeightKg] = useState(''); // Default to empty
+            const [baggageWeightKg, setBaggageWeightKg] = useState(''); // Default to empty
             const [phaseResults, setPhaseResults] = useState(null);
-
             const [userId, setUserId] = useState(null);
             const [isAuthReady, setIsAuthReady] = useState(false);
             const [isLoadingAircraft, setIsLoadingAircraft] = useState(true);
@@ -242,232 +200,187 @@
             const [newAircraftReg, setNewAircraftReg] = useState('');
             const [newAircraftEW, setNewAircraftEW] = useState('');
             const [newAircraftEM, setNewAircraftEM] = useState('');
-
             const [modalInfo, setModalInfo] = useState({ show: false, title: '', message: '' });
             const [isPdfLibraryAvailable, setIsPdfLibraryAvailable] = useState(false);
 
-            const showAlert = (title, message) => {
-                setModalInfo({ show: true, title, message });
-            };
+            const showAlert = (title, message) => setModalInfo({ show: true, title, message });
 
             useEffect(() => {
-                if (window.jspdf && typeof window.jspdf.jsPDF === 'function') {
-                    setIsPdfLibraryAvailable(true);
-                } else {
-                    setIsPdfLibraryAvailable(false);
-                    console.warn("jsPDF library not found on window object. PDF generation will be disabled.");
-                }
+                if (window.jspdf && typeof window.jspdf.jsPDF === 'function') setIsPdfLibraryAvailable(true);
+                else { setIsPdfLibraryAvailable(false); console.warn("jsPDF library not found. PDF generation disabled."); }
             }, []);
 
             useEffect(() => {
-                if (!auth) {
-                    setIsAuthReady(true);
-                    setUserId(crypto.randomUUID());
-                    return;
-                }
+                if (!auth) { setIsAuthReady(true); setUserId(crypto.randomUUID()); return; }
                 auth.onAuthStateChanged(user => {
-                    if (user) {
-                        setUserId(user.uid);
-                    } else {
-                        auth.signInAnonymously().catch(error => {
-                            console.error("Error signing in anonymously:", error);
-                            setUserId(crypto.randomUUID());
-                        });
-                    }
+                    if (user) setUserId(user.uid);
+                    else auth.signInAnonymously().catch(error => { console.error("Anon sign-in error:", error); setUserId(crypto.randomUUID()); });
                     setIsAuthReady(true);
                 });
             }, []);
 
             useEffect(() => {
                 if (!db || !isAuthReady || !userId) {
-                    setAircraftList(initialAircraftData);
-                    setIsLoadingAircraft(false);
-                    if (initialAircraftData.length > 0) {
-                        setSelectedAircraftId(initialAircraftData[0].id);
-                    }
+                    setAircraftList(initialAircraftData); setIsLoadingAircraft(false);
+                    if (initialAircraftData.length > 0) setSelectedAircraftId(initialAircraftData[0].id);
                     return;
                 }
                 const aircraftCollectionRef = db.collection(`artifacts/${appId}/users/${userId}/${AIRCRAFT_COLLECTION_NAME}`);
-                const setupInitialDataAndSubscribe = async () => {
-                    try {
-                        const snapshot = await aircraftCollectionRef.get();
-                        if (snapshot.empty) {
-                            console.log("Populating Firestore with initial aircraft data (full fleet)...");
-                            const batch = db.batch();
-                            initialAircraftData.forEach(craft => {
-                                const docRef = aircraftCollectionRef.doc(craft.registration);
-                                batch.set(docRef, craft);
-                            });
-                            await batch.commit();
-                        }
-                    } catch (error) { console.error("Error checking/populating initial aircraft data:", error); }
-                    
-                    const unsubscribe = aircraftCollectionRef.onSnapshot(querySnapshot => {
-                        const fetchedAircraft = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setAircraftList(fetchedAircraft);
-                        setIsLoadingAircraft(false);
-                        if (fetchedAircraft.length > 0 && !selectedAircraftId) {
-                            setSelectedAircraftId(fetchedAircraft[0].id);
-                        } else if (fetchedAircraft.length === 0) {
-                            setSelectedAircraftId('');
-                            setCurrentAircraft(null);
-                        }
-                    }, error => {
-                        console.error("Error fetching aircraft from Firestore:", error);
-                        setAircraftList(initialAircraftData);
-                        setIsLoadingAircraft(false);
-                        if (initialAircraftData.length > 0) {
-                            setSelectedAircraftId(initialAircraftData[0].id);
-                        }
-                    });
-                    return unsubscribe;
+                const setup = async () => {
+                    try { const snap = await aircraftCollectionRef.get(); if (snap.empty) { const batch = db.batch(); initialAircraftData.forEach(c => batch.set(aircraftCollectionRef.doc(c.registration), c)); await batch.commit(); }}
+                    catch (e) { console.error("Error populating Firestore:", e); }
+                    return aircraftCollectionRef.onSnapshot(qs => {
+                        const list = qs.docs.map(d => ({ id: d.id, ...d.data() })); setAircraftList(list); setIsLoadingAircraft(false);
+                        if (list.length > 0 && !selectedAircraftId) setSelectedAircraftId(list[0].id);
+                        else if (list.length === 0) { setSelectedAircraftId(''); setCurrentAircraft(null); }
+                    }, e => { console.error("Firestore fetch error:", e); setAircraftList(initialAircraftData); setIsLoadingAircraft(false); if (initialAircraftData.length > 0) setSelectedAircraftId(initialAircraftData[0].id); });
                 };
-                const unsubscribePromise = setupInitialDataAndSubscribe();
-                return () => { unsubscribePromise.then(unsub => { if (unsub) unsub(); }); };
+                const unsubPromise = setup(); return () => { unsubPromise.then(unsub => { if (unsub) unsub(); }); };
             }, [isAuthReady, userId]);
 
-            useEffect(() => {
-                const foundAircraft = aircraftList.find(ac => ac.id === selectedAircraftId);
-                setCurrentAircraft(foundAircraft || null);
-            }, [selectedAircraftId, aircraftList]);
+
+            useEffect(() => { setCurrentAircraft(aircraftList.find(ac => ac.id === selectedAircraftId) || null); }, [selectedAircraftId, aircraftList]);
 
             useEffect(() => {
-                const taxiL = parseFloat(fuelTaxiL) || 0;
-                const tripL = parseFloat(fuelTripL) || 0;
-                const alternateL = parseFloat(fuelAlternateL) || 0;
-                const reserveL = parseFloat(fuelReserveL) || 0;
-                const contingencyL = parseFloat(fuelContingencyL) || 0;
-                const extraL = parseFloat(fuelExtraL) || 0;
-                const totalL = taxiL + tripL + alternateL + reserveL + contingencyL + extraL;
+                const nums = [fuelTaxiL, fuelTripL, fuelAlternateL, fuelReserveL, fuelContingencyL, fuelExtraL].map(f => parseFloat(f) || 0);
+                const totalL = nums.reduce((sum, val) => sum + val, 0);
                 setRampFuelL(parseFloat(totalL.toFixed(2)));
                 setRampFuelKg(parseFloat((totalL * FUEL_DENSITY_KG_L).toFixed(2)));
-                if (totalL > MAX_FUEL_LITERS) {
-                    setFuelWarning(`Warning: Total fuel (${totalL.toFixed(2)}L) exceeds max tank capacity (${MAX_FUEL_LITERS}L).`);
-                } else {
-                    setFuelWarning('');
-                }
+                setFuelWarning(totalL > MAX_FUEL_LITERS ? `Warning: Total fuel (${totalL.toFixed(2)}L) exceeds max tank capacity (${MAX_FUEL_LITERS}L).` : '');
             }, [fuelTaxiL, fuelTripL, fuelAlternateL, fuelReserveL, fuelContingencyL, fuelExtraL]);
 
             const handleAddAircraft = async () => {
-                if (!db || !userId) { showAlert("Database Error", "Database not available."); return; }
-                if (!newAircraftReg || !newAircraftEW || !newAircraftEM) { showAlert("Input Error", "Please fill all aircraft fields."); return; }
+                if (!db || !userId) { showAlert("DB Error", "Database unavailable."); return; }
+                if (!newAircraftReg || !newAircraftEW || !newAircraftEM) { showAlert("Input Error", "All fields required."); return; }
                 const newCraft = { registration: newAircraftReg.toUpperCase(), name: newAircraftReg.toUpperCase(), emptyWeightKg: parseFloat(newAircraftEW), emptyWeightMomentKgm: parseFloat(newAircraftEM) };
-                try {
-                    await db.collection(`artifacts/${appId}/users/${userId}/${AIRCRAFT_COLLECTION_NAME}`).doc(newCraft.registration).set(newCraft);
-                    setNewAircraftReg(''); setNewAircraftEW(''); setNewAircraftEM(''); setShowAddAircraftModal(false);
-                } catch (error) { console.error("Error adding aircraft:", error); showAlert("Firestore Error", "Failed to add aircraft."); }
+                try { await db.collection(`artifacts/${appId}/users/${userId}/${AIRCRAFT_COLLECTION_NAME}`).doc(newCraft.registration).set(newCraft); setNewAircraftReg(''); setNewAircraftEW(''); setNewAircraftEM(''); setShowAddAircraftModal(false); }
+                catch (e) { console.error("Add aircraft error:", e); showAlert("Firestore Error", "Failed to add."); }
             };
 
-            const calculatePhaseMB = useCallback((aircraft, fuelForPhaseKg, pilotPaxKg, baggageKg) => {
+            const calculatePhaseMB = useCallback((aircraft, fuelKg, pilotPaxKg, baggageKg) => {
                 if (!aircraft) return null;
-                const ewKg = aircraft.emptyWeightKg, ewMomKgm = aircraft.emptyWeightMomentKgm;
-                const ewArmM = ewKg > 0 ? ewMomKgm / ewKg : 0;
-                const fuelMomKgm = fuelForPhaseKg * FUEL_ARM_M;
-                const pilotPaxMomKgm = pilotPaxKg * PILOT_PAX_ARM_M;
-                const baggageMomKgm = baggageKg * BAGGAGE_ARM_M;
-                const totalWeightNum = ewKg + fuelForPhaseKg + pilotPaxKg + baggageKg;
-                const totalMoment = ewMomKgm + fuelMomKgm + pilotPaxMomKgm + baggageMomKgm;
+                const { emptyWeightKg, emptyWeightMomentKgm } = aircraft;
+                const ewArmM = emptyWeightKg > 0 ? emptyWeightMomentKgm / emptyWeightKg : 0;
+                const items = {
+                    emptyWeight: { weight: emptyWeightKg.toFixed(2), arm: ewArmM.toFixed(3), moment: emptyWeightMomentKgm.toFixed(2) },
+                    fuel: { weight: fuelKg.toFixed(2), arm: FUEL_ARM_M.toFixed(3), moment: (fuelKg * FUEL_ARM_M).toFixed(2) },
+                    pilotPax: { weight: pilotPaxKg.toFixed(2), arm: PILOT_PAX_ARM_M.toFixed(3), moment: (pilotPaxKg * PILOT_PAX_ARM_M).toFixed(2) },
+                    baggage: { weight: baggageKg.toFixed(2), arm: BAGGAGE_ARM_M.toFixed(3), moment: (baggageKg * BAGGAGE_ARM_M).toFixed(2) }
+                };
+                const totalWeightNum = emptyWeightKg + fuelKg + pilotPaxKg + baggageKg;
+                const totalMoment = emptyWeightMomentKgm + (fuelKg * FUEL_ARM_M) + (pilotPaxKg * PILOT_PAX_ARM_M) + (baggageKg * BAGGAGE_ARM_M);
                 const distanceDNum = totalWeightNum > 0 ? totalMoment / totalWeightNum : 0;
-                const finalCoGForUI = distanceDNum;
                 let status = [];
                 if (totalWeightNum > MAX_WEIGHT_KG) status.push(`OVERWEIGHT (${totalWeightNum.toFixed(2)}kg > ${MAX_WEIGHT_KG.toFixed(2)}kg)`);
-                if (finalCoGForUI < COG_MIN_FWD_M) status.push(`CoG FWD LIMIT (${finalCoGForUI.toFixed(3)}m < ${COG_MIN_FWD_M.toFixed(3)}m)`);
-                else if (finalCoGForUI > COG_MAX_AFT_M) status.push(`CoG AFT LIMIT (${finalCoGForUI.toFixed(3)}m > ${COG_MAX_AFT_M.toFixed(3)}m)`);
-                return {
-                    emptyWeight: { weight: ewKg.toFixed(2), arm: ewArmM.toFixed(3), moment: ewMomKgm.toFixed(2) },
-                    fuel: { weight: fuelForPhaseKg.toFixed(2), arm: FUEL_ARM_M.toFixed(3), moment: fuelMomKgm.toFixed(2) },
-                    pilotPax: { weight: pilotPaxKg.toFixed(2), arm: PILOT_PAX_ARM_M.toFixed(3), moment: pilotPaxMomKgm.toFixed(2) },
-                    baggage: { weight: baggageKg.toFixed(2), arm: BAGGAGE_ARM_M.toFixed(3), moment: baggageMomKgm.toFixed(2) },
-                    totalWeight: totalWeightNum.toFixed(2), totalWeightRaw: totalWeightNum, totalMoment: totalMoment.toFixed(2),
-                    distanceD: distanceDNum.toFixed(3), distanceDRaw: distanceDNum, finalCoG: finalCoGForUI.toFixed(3),
-                    validationStatus: status.length === 0 ? 'Within Limits' : status.join('\n'),
-                };
+                if (distanceDNum < COG_MIN_FWD_M) status.push(`CoG FWD LIMIT (${distanceDNum.toFixed(3)}m < ${COG_MIN_FWD_M.toFixed(3)}m)`);
+                else if (distanceDNum > COG_MAX_AFT_M) status.push(`CoG AFT LIMIT (${distanceDNum.toFixed(3)}m > ${COG_MAX_AFT_M.toFixed(3)}m)`);
+                return { ...items, totalWeight: totalWeightNum.toFixed(2), totalWeightRaw: totalWeightNum, totalMoment: totalMoment.toFixed(2), distanceD: distanceDNum.toFixed(3), distanceDRaw: distanceDNum, finalCoG: distanceDNum.toFixed(3), validationStatus: status.length === 0 ? 'Within Limits' : status.join('\n') };
             }, []);
 
             const calculateAllPhasesMassAndBalance = useCallback(() => {
                 if (!currentAircraft) { setPhaseResults(null); return; }
                 const pilotPax = parseFloat(pilotPaxWeightKg) || 0;
                 const baggage = parseFloat(baggageWeightKg) || 0;
-                const taxiBurn = (parseFloat(fuelTaxiL) || 0) * FUEL_DENSITY_KG_L;
-                const tripBurn = (parseFloat(fuelTripL) || 0) * FUEL_DENSITY_KG_L;
-                const altBurn = (parseFloat(fuelAlternateL) || 0) * FUEL_DENSITY_KG_L;
-                const departureFuel = rampFuelKg;
-                const arrivalFuel = Math.max(0, departureFuel - tripBurn - taxiBurn);
-                const alternateFuel = Math.max(0, arrivalFuel - altBurn);
+                const taxiBurnKg = (parseFloat(fuelTaxiL) || 0) * FUEL_DENSITY_KG_L;
+                const tripBurnKg = (parseFloat(fuelTripL) || 0) * FUEL_DENSITY_KG_L;
+                const altLegFuelLiters = parseFloat(fuelAlternateL) || 0; 
+                const altLegFuelKg = altLegFuelLiters * FUEL_DENSITY_KG_L;
+                
+                const departureFuelKg = rampFuelKg;
+                const arrivalAtDestFuelKg = Math.max(0, departureFuelKg - tripBurnKg - taxiBurnKg);
+                const fuelForLegToAlternate = arrivalAtDestFuelKg; 
+                const arrivalAtAltFuelKg = Math.max(0, fuelForLegToAlternate - altLegFuelKg);
+
                 setPhaseResults({
-                    departure: calculatePhaseMB(currentAircraft, departureFuel, pilotPax, baggage),
-                    arrival: calculatePhaseMB(currentAircraft, arrivalFuel, pilotPax, baggage),
-                    alternate: calculatePhaseMB(currentAircraft, alternateFuel, pilotPax, baggage),
+                    departure: calculatePhaseMB(currentAircraft, departureFuelKg, pilotPax, baggage),
+                    arrival: calculatePhaseMB(currentAircraft, arrivalAtDestFuelKg, pilotPax, baggage), 
+                    alternate: calculatePhaseMB(currentAircraft, arrivalAtAltFuelKg, pilotPax, baggage) 
                 });
             }, [currentAircraft, rampFuelKg, pilotPaxWeightKg, baggageWeightKg, fuelTaxiL, fuelTripL, fuelAlternateL, calculatePhaseMB]);
-
+            
             useEffect(() => { calculateAllPhasesMassAndBalance(); }, [calculateAllPhasesMassAndBalance]);
 
             const generatePdf = () => {
                 try {
-                    if (!phaseResults || !phaseResults.departure || !currentAircraft) {
-                        showAlert("PDF Error", "Departure M&B data not available."); return;
-                    }
-                    if (!isPdfLibraryAvailable) {
-                        showAlert("PDF Generation Unavailable", "The jsPDF library is not loaded in this environment. To use this feature, please ensure the page includes the jsPDF script, or host the application in an environment where you can install it as a dependency.");
-                        return;
-                    }
+                    if (!phaseResults || !currentAircraft) { showAlert("PDF Error", "Calculate M&B first."); return; }
+                    if (!isPdfLibraryAvailable) { showAlert("PDF Generation Unavailable", "jsPDF library not available."); return; }
+                    
                     const { jsPDF: JSPDF_CONSTRUCTOR } = window.jspdf;
                     const doc = new JSPDF_CONSTRUCTOR();
-                    const departureData = phaseResults.departure;
-                    const finalCoGForPDF = (parseFloat(departureData.distanceDRaw) + COG_ADD_FACTOR_M).toFixed(3);
-                    
-                    const drawText = (text, x, y, size = 10, style = 'normal', align = 'left') => {
-                        doc.setFontSize(size); doc.setFont('helvetica', style); doc.text(text, x, y, { align });
-                    };
-                    const drawMBForm = (offsetX) => {
+
+                    const drawMBFormOnDoc = (offsetX, offsetY, phaseData, fromToLabel) => {
+                        if (!phaseData) return;
+                        const finalCoGForPDFLine = (parseFloat(phaseData.distanceDRaw) + COG_ADD_FACTOR_M).toFixed(3);
+                        
+                        const drawText = (text, x, y, size = 10, style = 'normal', align = 'left') => {
+                            doc.setFontSize(size); doc.setFont('helvetica', style); doc.text(text, x, y + offsetY, { align });
+                        };
+                        const rect = (x,y,w,h) => doc.rect(x, y + offsetY, w, h);
+                        const line = (x1,y1,x2,y2) => doc.line(x1, y1 + offsetY, x2, y2 + offsetY);
+
                         drawText("COSTRUZIONI AERONAUTICHE", offsetX + 50, 15, 10, 'bold', 'center');
                         drawText("TECNAM P2008 JC - Aircraft Flight Manual", offsetX + 50, 20, 9, 'normal', 'center');
-                        doc.rect(offsetX + 5, 25, 90, 20);
+                        rect(offsetX + 5, 25, 90, 20);
                         drawText(`Date: ${flightDate}`, offsetX + 7, 30, 9);
                         drawText(`Registration: ${currentAircraft.registration}`, offsetX + 7, 35, 9);
-                        drawText(`From/To: ${flightFrom} / ${flightTo}`, offsetX + 7, 40, 9);
+                        drawText(`From/To: ${fromToLabel}`, offsetX + 7, 40, 9);
                         drawText("CoG Position Computation Chart", offsetX + 50, 50, 10, 'bold', 'center');
                         const tableStartY = 55, col1X = offsetX + 5, col2X = offsetX + 45, col3X = offsetX + 65, col4X = offsetX + 85;
                         drawText("Weight (kg)", col2X, tableStartY, 8, 'bold', 'center'); drawText("Arm (m)*", col3X, tableStartY, 8, 'bold', 'center'); drawText("Moment (kg*m)", col4X, tableStartY, 8, 'bold', 'center');
-                        doc.line(offsetX + 5, tableStartY + 3, offsetX + 95, tableStartY + 3);
+                        line(offsetX + 5, tableStartY + 3, offsetX + 95, tableStartY + 3);
                         let currentY = tableStartY + 8; const rowHeight = 6;
                         const drawRow = (label, itemData) => {
                             drawText(label, col1X, currentY, 9); drawText(itemData.weight, col2X, currentY, 9, 'normal', 'center');
                             drawText(itemData.arm, col3X, currentY, 9, 'normal', 'center'); drawText(itemData.moment, col4X, currentY, 9, 'normal', 'center');
-                            doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                            line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
                         };
-                        drawRow("EmptyWeight", departureData.emptyWeight); drawRow("Fuel", departureData.fuel);
-                        drawRow("Pilot&Passenger", departureData.pilotPax); drawRow("Baggage", departureData.baggage);
+                        drawRow("EmptyWeight", phaseData.emptyWeight); drawRow("Fuel", phaseData.fuel);
+                        drawRow("Pilot&Passenger", phaseData.pilotPax); drawRow("Baggage", phaseData.baggage);
                         currentY += rowHeight / 2;
-                        drawText("Total MOMENT", col1X, currentY, 9); drawText(departureData.totalMoment, col4X, currentY, 9, 'normal', 'center');
-                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
-                        drawText("Total WEIGHT", col1X, currentY, 9); drawText(departureData.totalWeight, col2X, currentY, 9, 'normal', 'center');
-                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        drawText("Total MOMENT", col1X, currentY, 9); drawText(phaseData.totalMoment, col4X, currentY, 9, 'normal', 'center');
+                        line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        drawText("Total WEIGHT", col1X, currentY, 9); drawText(phaseData.totalWeight, col2X, currentY, 9, 'normal', 'center');
+                        line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
                         currentY += rowHeight / 2;
-                        drawText(`Distance "D"= MOMENT/WEIGHT`, col1X, currentY, 9); drawText(departureData.distanceD, col4X, currentY, 9, 'normal', 'center');
-                        doc.line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
+                        drawText(`Distance "D"= MOMENT/WEIGHT`, col1X, currentY, 9); drawText(phaseData.distanceD, col4X, currentY, 9, 'normal', 'center');
+                        line(offsetX + 5, currentY + 2, offsetX + 95, currentY + 2); currentY += rowHeight;
                         drawText(`*ADD to the distance "D" the value 1.566m (62in)`, offsetX + 7, currentY, 7); currentY += rowHeight;
-                        drawText(`Calculated Final CoG: ${finalCoGForPDF} m`, offsetX + 7, currentY, 9, 'bold'); currentY += rowHeight;
-                        doc.rect(offsetX + 5, currentY, 90, 15);
+                        drawText(`Calculated Final CoG: ${finalCoGForPDFLine} m`, offsetX + 7, currentY, 9, 'bold'); currentY += rowHeight;
+                        rect(offsetX + 5, currentY, 90, 15);
                         drawText("C.G.Range", offsetX + 7, currentY + 4, 8, 'bold'); drawText("Max FWD", offsetX + 35, currentY + 4, 8, 'bold'); drawText("Max AFT", offsetX + 55, currentY + 4, 8, 'bold');
                         drawText("Meters", offsetX + 7, currentY + 9, 8); drawText(COG_MIN_FWD_M.toFixed(3), offsetX + 35, currentY + 9, 8); drawText(COG_MAX_AFT_M.toFixed(3), offsetX + 55, currentY + 9, 8);
                         currentY += 17;
-                        doc.rect(offsetX + 5, currentY, 90, 10);
+                        rect(offsetX + 5, currentY, 90, 10);
                         drawText("Max Weight", offsetX + 7, currentY + 4, 8, 'bold'); drawText("Kilograms", offsetX + 55, currentY + 4, 8, 'bold');
                         drawText(MAX_WEIGHT_KG.toFixed(2), offsetX + 55, currentY + 8, 8); currentY += 12;
-                        const statusColor = departureData.validationStatus === 'Within Limits' ? [0,0,0] : [255,0,0];
+                        const statusColor = phaseData.validationStatus === 'Within Limits' ? [0,0,0] : [255,0,0];
                         doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
-                        drawText(`Status: ${departureData.validationStatus.split('\n')[0]}`, offsetX + 7, currentY, 9, 'normal');
+                        drawText(`Status: ${phaseData.validationStatus.split('\n')[0]}`, offsetX + 7, currentY, 9, 'normal');
                         doc.setTextColor(0,0,0); currentY += 10;
                         drawText("Signature: ________________________", offsetX + 7, currentY, 9); currentY += 10;
                         drawText("Section 6 - Weight and balance", offsetX + 50, currentY, 8, 'bold', 'center');
                     };
-                    drawMBForm(10);
+
+                    const fuelForLegToAlternateKg = parseFloat(phaseResults.arrival.fuel.weight);
+                    const mbForLegToAlternate = calculatePhaseMB(currentAircraft, fuelForLegToAlternateKg, parseFloat(pilotPaxWeightKg) || 0, parseFloat(baggageWeightKg) || 0);
+
+                    const fuelForLegFromAlternateKg = parseFloat(phaseResults.alternate.fuel.weight);
+                    const mbForLegFromAlternate = calculatePhaseMB(currentAircraft, fuelForLegFromAlternateKg, parseFloat(pilotPaxWeightKg) || 0, parseFloat(baggageWeightKg) || 0);
+
+                    drawMBFormOnDoc(10, 0, phaseResults.departure, `${flightFrom || 'N/A'} / ${flightTo || 'N/A'}`);
+                    if (mbForLegToAlternate) {
+                         drawMBFormOnDoc(105, 0, mbForLegToAlternate, `${flightTo || 'N/A'} / ${alternateAirportIcao || 'ALTN'}`);
+                    }
+                    
+                    if (mbForLegFromAlternate) {
+                        doc.addPage();
+                        drawMBFormOnDoc(10, 0, mbForLegFromAlternate, `${alternateAirportIcao || 'ALTN'} / Next Dest.`);
+                    }
+                    
                     doc.save(`P2008JC_MassBalance_${currentAircraft.registration}_${flightDate}.pdf`);
                 } catch (error) {
                     console.error("Error during PDF generation:", error);
-                    showAlert("PDF Generation Error", `An error occurred while generating the PDF: ${error.message}. Check console for details.`);
+                    showAlert("PDF Generation Error", `An error occurred: ${error.message}. Check console.`);
                 }
             };
             
@@ -505,6 +418,7 @@
                                     <InputField label="From (ICAO)" type="text" value={flightFrom} onChange={e => setFlightFrom(e.target.value.toUpperCase())} placeholder="LIPE" />
                                     <InputField label="To (ICAO)" type="text" value={flightTo} onChange={e => setFlightTo(e.target.value.toUpperCase())} placeholder="LIPZ" />
                                 </div>
+                                <InputField label="Alternate Airport (ICAO)" type="text" value={alternateAirportIcao} onChange={e => setAlternateAirportIcao(e.target.value.toUpperCase())} placeholder="LIBP" />
                             </Section>
                             <Section title="Fuel Calculator">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
@@ -526,7 +440,7 @@
                             </Section>
                         </div>
                         <div className="lg:col-span-2">
-                            <Section title="Mass & Balance Multi-Phase Results" className="overflow-x-auto">
+                            <Section title="Mass & Balance Results" className="overflow-x-auto">
                                 {currentAircraft && phaseResults ? (
                                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                                         <thead className="bg-gray-100">
@@ -593,7 +507,7 @@
                                         ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2'
                                     }`}
                                     title={!isPdfLibraryAvailable ? "PDF library not available" : ((!phaseResults || !phaseResults.departure) ? "Calculate M&B first" : "Generate PDF")}
-                                >Generate PDF (Departure M&B)</button>
+                                >Generate PDF</button>
                             </div>
                         </div>
                     </div>
@@ -613,7 +527,6 @@
             );
         };
         
-        // Use renamed helper components to avoid conflict with React's own
         const RenderPhaseDataCell = (data, itemKey, subKey, textAlign = 'text-right', isFirstColOfPhase = false) => {
             if (!data || !data[itemKey]) return <td className={`px-2 py-2 ${textAlign} ${isFirstColOfPhase ? 'border-l border-gray-300' : ''}`}>-</td>;
             const value = data[itemKey][subKey];
